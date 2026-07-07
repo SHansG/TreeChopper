@@ -1,0 +1,425 @@
+package pl.hansg.treechopper;
+
+import org.bukkit.GameMode;
+import org.bukkit.Material;
+import org.bukkit.Sound;
+import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import net.kyori.adventure.text.format.NamedTextColor;
+import net.kyori.adventure.text.Component;
+import org.bukkit.enchantments.Enchantment;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.Damageable;
+import org.bukkit.plugin.java.JavaPlugin;
+
+import java.util.ArrayDeque;
+import java.util.ArrayList;
+import java.util.Collection;
+import java.util.HashSet;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Locale;
+import java.util.Queue;
+import java.util.Random;
+import java.util.Set;
+
+public final class TreeChopperPlugin extends JavaPlugin implements Listener {
+
+    private final Random random = new Random();
+
+    @Override
+    public void onEnable() {
+        saveDefaultConfig();
+
+        getServer().getPluginManager().registerEvents(this, this);
+
+        if (getCommand("treechopper") != null) {
+            getCommand("treechopper").setExecutor(this);
+            getCommand("treechopper").setTabCompleter(this);
+        }
+
+        getLogger().info("SimpleTreeChopper enabled.");
+    }
+
+    @Override
+    public void onDisable() {
+        getLogger().info("SimpleTreeChopper disabled.");
+    }
+
+    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    public void onBlockBreak(BlockBreakEvent event) {
+        Player player = event.getPlayer();
+        Block block = event.getBlock();
+        ItemStack tool = player.getInventory().getItemInMainHand();
+
+        if (!shouldTreeChop(player, block, tool)) {
+            return;
+        }
+
+        /*
+         * Cancel vanilla handling for the original log.
+         * This prevents duplicate drops and prevents other plugins with ignoreCancelled=true from processing it after this.
+         */
+        event.setDropItems(false);
+        event.setExpToDrop(0);
+        event.setCancelled(true);
+
+        chopTree(player, block, tool);
+    }
+
+    private boolean shouldTreeChop(Player player, Block block, ItemStack tool) {
+        if (!getConfig().getBoolean("tree-chopper.enabled", true)) {
+            return false;
+        }
+
+        if (!player.hasPermission("treechopper.use")) {
+            return false;
+        }
+
+        if (player.getGameMode() == GameMode.CREATIVE) {
+            return false;
+        }
+
+        if (!isWorldEnabled(block.getWorld())) {
+            return false;
+        }
+
+        if (!isLog(block.getType())) {
+            return false;
+        }
+
+        if (getConfig().getBoolean("tree-chopper.require-sneaking", true) && !player.isSneaking()) {
+            return false;
+        }
+
+        if (getConfig().getBoolean("tree-chopper.require-axe", true) && !isAxe(tool)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private boolean isWorldEnabled(World world) {
+        List<String> enabledWorlds = getConfig().getStringList("worlds.enabled");
+        return enabledWorlds.isEmpty() || enabledWorlds.contains(world.getName());
+    }
+
+    private void chopTree(Player player, Block startBlock, ItemStack tool) {
+        Set<Block> logs = findConnectedLogs(startBlock);
+        Set<Block> choppedLogs = new LinkedHashSet<>();
+
+        boolean damageTool = getConfig().getBoolean("tree-chopper.tool.damage-enabled", true);
+        int damagePerLog = getConfig().getInt("tree-chopper.tool.damage-per-log", 1);
+
+        for (Block log : logs) {
+            if (!isLog(log.getType())) {
+                continue;
+            }
+
+            if (tool == null || tool.getType().isAir()) {
+                break;
+            }
+
+            Collection<ItemStack> drops = log.getDrops(tool, player);
+
+            log.setType(Material.AIR, false);
+            choppedLogs.add(log);
+
+            for (ItemStack drop : drops) {
+                log.getWorld().dropItemNaturally(log.getLocation(), drop);
+            }
+
+            if (damageTool) {
+                boolean broke = damageTool(player, tool, damagePerLog);
+
+                if (broke) {
+                    break;
+                }
+            }
+        }
+
+        if (getConfig().getBoolean("tree-chopper.leaves.enabled", true)) {
+            Set<Block> leaves = findLeavesAroundLogs(choppedLogs);
+            chopLeaves(player, leaves, tool);
+        }
+    }
+
+    private Set<Block> findConnectedLogs(Block startBlock) {
+        Set<Block> found = new LinkedHashSet<>();
+        Queue<Block> queue = new ArrayDeque<>();
+
+        Material startType = startBlock.getType();
+        boolean sameTypeOnly = getConfig().getBoolean("tree-chopper.same-log-type-only", true);
+        int maxLogs = getConfig().getInt("tree-chopper.max-logs", 128);
+
+        queue.add(startBlock);
+        found.add(startBlock);
+
+        while (!queue.isEmpty() && found.size() < maxLogs) {
+            Block current = queue.poll();
+
+            for (int x = -1; x <= 1; x++) {
+                for (int y = -1; y <= 1; y++) {
+                    for (int z = -1; z <= 1; z++) {
+                        if (x == 0 && y == 0 && z == 0) {
+                            continue;
+                        }
+
+                        Block nearby = current.getRelative(x, y, z);
+                        Material nearbyType = nearby.getType();
+
+                        if (!isLog(nearbyType)) {
+                            continue;
+                        }
+
+                        if (sameTypeOnly && nearbyType != startType) {
+                            continue;
+                        }
+
+                        if (found.contains(nearby)) {
+                            continue;
+                        }
+
+                        found.add(nearby);
+                        queue.add(nearby);
+
+                        if (found.size() >= maxLogs) {
+                            return found;
+                        }
+                    }
+                }
+            }
+        }
+
+        return found;
+    }
+
+    private Set<Block> findLeavesAroundLogs(Set<Block> logs) {
+        Set<Block> leaves = new HashSet<>();
+
+        int radius = getConfig().getInt("tree-chopper.leaves.radius-around-logs", 3);
+        int maxLeaves = getConfig().getInt("tree-chopper.leaves.max-leaves", 128);
+
+        for (Block log : logs) {
+            for (int x = -radius; x <= radius; x++) {
+                for (int y = -radius; y <= radius; y++) {
+                    for (int z = -radius; z <= radius; z++) {
+                        if (leaves.size() >= maxLeaves) {
+                            return leaves;
+                        }
+
+                        Block nearby = log.getRelative(x, y, z);
+
+                        if (isLeaves(nearby.getType())) {
+                            leaves.add(nearby);
+                        }
+                    }
+                }
+            }
+        }
+
+        return leaves;
+    }
+
+    private void chopLeaves(Player player, Set<Block> leaves, ItemStack tool) {
+        boolean dropItems = getConfig().getBoolean("tree-chopper.leaves.drop-items", true);
+
+        for (Block leaf : leaves) {
+            if (!isLeaves(leaf.getType())) {
+                continue;
+            }
+
+            Collection<ItemStack> drops = dropItems
+                    ? leaf.getDrops(tool, player)
+                    : List.of();
+
+            leaf.setType(Material.AIR, false);
+
+            for (ItemStack drop : drops) {
+                leaf.getWorld().dropItemNaturally(leaf.getLocation(), drop);
+            }
+        }
+    }
+
+    private boolean damageTool(Player player, ItemStack tool, int damage) {
+        if (damage <= 0) {
+            return false;
+        }
+
+        if (tool == null || tool.getType().isAir()) {
+            return true;
+        }
+
+        if (!(tool.getItemMeta() instanceof Damageable meta)) {
+            return false;
+        }
+
+        int finalDamage = calculateFinalToolDamage(tool, damage);
+
+        if (finalDamage <= 0) {
+            return false;
+        }
+
+        int newDamage = meta.getDamage() + finalDamage;
+        int maxDurability = tool.getType().getMaxDurability();
+
+        if (newDamage >= maxDurability) {
+            player.getInventory().setItemInMainHand(null);
+
+            if (getConfig().getBoolean("tree-chopper.tool.play-break-sound", true)) {
+                player.playSound(player.getLocation(), Sound.ENTITY_ITEM_BREAK, 1.0f, 1.0f);
+            }
+
+            return true;
+        }
+
+        meta.setDamage(newDamage);
+        tool.setItemMeta(meta);
+        return false;
+    }
+
+    private int calculateFinalToolDamage(ItemStack tool, int damage) {
+        boolean respectUnbreaking = getConfig().getBoolean("tree-chopper.tool.respect-unbreaking", true);
+
+        if (!respectUnbreaking) {
+            return damage;
+        }
+
+        int unbreakingLevel = tool.getEnchantmentLevel(Enchantment.UNBREAKING);
+
+        if (unbreakingLevel <= 0) {
+            return damage;
+        }
+
+        int finalDamage = 0;
+
+        for (int i = 0; i < damage; i++) {
+            if (!shouldPreventDamageByUnbreaking(unbreakingLevel)) {
+                finalDamage++;
+            }
+        }
+
+        return finalDamage;
+    }
+
+    private boolean shouldPreventDamageByUnbreaking(int unbreakingLevel) {
+        /*
+         * Simple vanilla-like approximation:
+         * Unbreaking I prevents some damage.
+         * Higher levels prevent more damage.
+         */
+        return random.nextInt(unbreakingLevel + 1) > 0;
+    }
+
+    private boolean isLog(Material material) {
+        String name = material.name();
+
+        return name.endsWith("_LOG")
+                || name.endsWith("_WOOD")
+                || name.endsWith("_STEM")
+                || name.endsWith("_HYPHAE");
+    }
+
+    private boolean isLeaves(Material material) {
+        String name = material.name();
+
+        return name.endsWith("_LEAVES")
+                || material == Material.NETHER_WART_BLOCK
+                || material == Material.WARPED_WART_BLOCK;
+    }
+
+    private boolean isAxe(ItemStack item) {
+        if (item == null || item.getType().isAir()) {
+            return false;
+        }
+
+        return item.getType().name().endsWith("_AXE");
+    }
+
+    private void sendStatus(CommandSender sender) {
+        sender.sendMessage(Component.text("SimpleTreeChopper status:", NamedTextColor.GOLD));
+        sender.sendMessage(Component.text("Enabled: ", NamedTextColor.GRAY).append(Component.text(getConfig().getBoolean("tree-chopper.enabled", true), NamedTextColor.YELLOW)));
+        sender.sendMessage(Component.text("Require sneaking: ", NamedTextColor.GRAY).append(Component.text(getConfig().getBoolean("tree-chopper.require-sneaking", true), NamedTextColor.YELLOW)));
+        sender.sendMessage(Component.text("Require axe: ", NamedTextColor.GRAY).append(Component.text(getConfig().getBoolean("tree-chopper.require-axe", true), NamedTextColor.YELLOW)));
+        sender.sendMessage(Component.text("Max logs: ", NamedTextColor.GRAY).append(Component.text(getConfig().getInt("tree-chopper.max-logs", 128), NamedTextColor.YELLOW)));
+        sender.sendMessage(Component.text("Leaves enabled: ", NamedTextColor.GRAY).append(Component.text(getConfig().getBoolean("tree-chopper.leaves.enabled", true), NamedTextColor.YELLOW)));
+    }
+
+    private void sendUsage(CommandSender sender) {
+        sender.sendMessage(Component.text( "SimpleTreeChopper commands:", NamedTextColor.YELLOW));
+        sender.sendMessage(Component.text("/treechopper status", NamedTextColor.GRAY));
+        sender.sendMessage(Component.text("/treechopper reload", NamedTextColor.GRAY));
+    }
+
+    @Override
+    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
+        if (!command.getName().equalsIgnoreCase("treechopper")) {
+            return false;
+        }
+
+        if (args.length == 0) {
+            sendUsage(sender);
+            return true;
+        }
+
+        if (args[0].equalsIgnoreCase("status")) {
+            sendStatus(sender);
+            return true;
+        }
+
+        if (args[0].equalsIgnoreCase("reload")) {
+            if (!sender.hasPermission("treechopper.reload")) {
+                sender.sendMessage(Component.text("You do not have permission.", NamedTextColor.RED));
+                return true;
+            }
+
+            reloadConfig();
+            sender.sendMessage(Component.text("SimpleTreeChopper config reloaded.", NamedTextColor.GREEN));
+            return true;
+        }
+
+        sendUsage(sender);
+        return true;
+    }
+
+    @Override
+    public List<String> onTabComplete(CommandSender sender, Command command, String alias, String[] args) {
+        List<String> suggestions = new ArrayList<>();
+
+        if (!command.getName().equalsIgnoreCase("treechopper")) {
+            return suggestions;
+        }
+
+        if (args.length == 1) {
+            suggestions.add("status");
+
+            if (sender.hasPermission("treechopper.reload")) {
+                suggestions.add("reload");
+            }
+
+            return filterSuggestions(suggestions, args[0]);
+        }
+
+        return suggestions;
+    }
+
+    private List<String> filterSuggestions(List<String> suggestions, String input) {
+        String lowerInput = input.toLowerCase(Locale.ROOT);
+        List<String> filtered = new ArrayList<>();
+
+        for (String suggestion : suggestions) {
+            if (suggestion.toLowerCase(Locale.ROOT).startsWith(lowerInput)) {
+                filtered.add(suggestion);
+            }
+        }
+
+        return filtered;
+    }
+}

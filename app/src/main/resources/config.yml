@@ -1,0 +1,36 @@
+tree-chopper:
+  enabled: true
+
+  # Only chop whole tree when player is sneaking.
+  require-sneaking: true
+
+  # Only chop whole tree when player uses an axe.
+  require-axe: true
+
+  # Safety limit for maximum logs chopped from one tree.
+  max-logs: 128
+
+  # If true, oak only connects to oak, birch only to birch, etc.
+  same-log-type-only: true
+
+  tool:
+    damage-enabled: true
+    damage-per-log: 1
+    respect-unbreaking: true
+    play-break-sound: true
+
+  leaves:
+    enabled: true
+
+    # If true, leaves can drop saplings, apples, sticks, etc.
+    drop-items: true
+
+    # Search radius around every chopped log.
+    radius-around-logs: 3
+
+    # Safety limit for maximum leaves removed.
+    max-leaves: 128
+
+worlds:
+  # Empty list means all worlds are enabled.
+  enabled: []

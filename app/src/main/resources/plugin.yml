@@ -1,0 +1,21 @@
+name: SimpleTreeChopper
+version: 1.0.0
+main: pl.hansg.treechopper.SimpleTreeChopperPlugin
+api-version: '26.1.2'
+author: HansG
+description: Simple tree chopper with leaf removal and tool durability.
+
+commands:
+  treechopper:
+    description: SimpleTreeChopper command
+    usage: /treechopper <reload|status>
+    aliases: [stc]
+
+permissions:
+  treechopper.use:
+    description: Allows player to chop whole trees
+    default: true
+
+  treechopper.reload:
+    description: Allows reloading the config
+    default: op
