@@ -29,5 +29,5 @@ tasks.withType(JavaCompile).configureEach {
 }
 
 jar {
-    archiveFileName = "MiningDrops-${version}.jar"
+    archiveFileName = "TreeChopper-${version}.jar"
 }
