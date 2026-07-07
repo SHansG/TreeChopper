@@ -1,15 +1,15 @@
-name: SimpleTreeChopper
+name: TreeChopper
 version: 1.0.0
-main: pl.hansg.treechopper.SimpleTreeChopperPlugin
+main: pl.hansg.treechopper.TreeChopperPlugin
 api-version: '26.1.2'
 author: HansG
 description: Simple tree chopper with leaf removal and tool durability.
 
 commands:
   treechopper:
-    description: SimpleTreeChopper command
+    description: TreeChopper command
     usage: /treechopper <reload|status>
-    aliases: [stc]
+    aliases: [tc]
 
 permissions:
   treechopper.use:

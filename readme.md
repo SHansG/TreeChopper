@@ -39,7 +39,7 @@ Reloads the plugin configuration.
 Alias:
 
 ```text
-/stc
+/tc
 ```
 
 ## Permissions
