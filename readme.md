@@ -1,6 +1,6 @@
-# SimpleTreeChopper
+# TreeChopper
 
-SimpleTreeChopper is a lightweight Paper plugin that lets players chop an entire tree by sneaking and breaking one log with an axe. It includes optional leaf removal, direct-to-inventory drops, tool durability damage, Unbreaking support, and basic configuration for SkyBlock or survival servers.
+TreeChopper is a lightweight Paper plugin that lets players chop an entire tree by sneaking and breaking one log with an axe. It includes optional leaf removal, direct-to-inventory drops, tool durability damage, Unbreaking support, and basic configuration for SkyBlock or survival servers.
 
 ## Features
 
@@ -12,7 +12,7 @@ SimpleTreeChopper is a lightweight Paper plugin that lets players chop an entire
 - Optional Unbreaking enchantment support
 - Configurable maximum logs and leaves per chop
 - World whitelist support
-- Simple admin reload command
+- Admin reload command
 
 ## Requirements
 
@@ -29,6 +29,12 @@ The plugin is designed for modern Paper servers and uses only standard Bukkit/Pa
 ```
 
 Shows the current plugin configuration summary.
+
+```text
+/treechopper toggle
+```
+
+Toggles on/off the tree chopping.
 
 ```text
 /treechopper reload
@@ -50,6 +56,12 @@ treechopper.use
 
 Allows players to use tree chopping.
 
+```text
+treechopper.toggle
+```
+
+Allows players to toggle on/off tree chopping.
+
 Default: `true`
 
 ```text
@@ -64,6 +76,7 @@ LuckPerms examples:
 
 ```text
 /lp group default permission set treechopper.use true
+/lp group default permission set treechopper.toggle true
 /lp group admin permission set treechopper.reload true
 ```
 
@@ -86,6 +99,7 @@ Default configuration example:
 ```yaml
 tree-chopper:
   enabled: true
+  default-enabled-for-players: false
   require-sneaking: true
   require-axe: true
   max-logs: 96
