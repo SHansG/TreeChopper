@@ -2,6 +2,7 @@ package pl.hansg.treechopper;
 
 import org.bukkit.GameMode;
 import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
 import org.bukkit.Sound;
 import org.bukkit.World;
 import org.bukkit.block.Block;
@@ -21,6 +22,8 @@ import org.bukkit.event.block.BlockBreakEvent;
 import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.plugin.java.JavaPlugin;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
 
 import java.io.File;
 import java.io.IOException;
@@ -42,6 +45,9 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
 
     private final Set<UUID> toggledPlayers = new HashSet<>();
 
+    private final ThreadLocal<Boolean> syntheticTreeBreak = ThreadLocal.withInitial(() -> false);
+    private NamespacedKey syntheticBreakKey;
+
     private File dataFile;
     private FileConfiguration dataConfig;
 
@@ -50,6 +56,8 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
         saveDefaultConfig();
         setupDataFile();
         loadToggledPlayers();
+
+        syntheticBreakKey = new NamespacedKey("custommechanics", "synthetic_treechopper_break");
 
         getServer().getPluginManager().registerEvents(this, this);
 
@@ -69,6 +77,11 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
 
     @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
+        if(syntheticTreeBreak.get()) {
+            return;
+        }
+
+
         Player player = event.getPlayer();
         Block block = event.getBlock();
         ItemStack tool = player.getInventory().getItemInMainHand();
@@ -89,15 +102,36 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
     }
 
     private boolean isTreeChopperEnabled(Player player) {
-    boolean defaultEnabled = getConfig().getBoolean("tree-chopper.default-enabled-for-players", true);
-    boolean isToggled = toggledPlayers.contains(player.getUniqueId());
+        boolean defaultEnabled = getConfig().getBoolean("tree-chopper.default-enabled-for-players", true);
+        boolean isToggled = toggledPlayers.contains(player.getUniqueId());
 
-    if (defaultEnabled) {
-        return !isToggled;
+        if (defaultEnabled) {
+            return !isToggled;
+        }
+
+        return isToggled;
     }
 
-    return isToggled;
-}
+    private boolean callSyntheticBlockBreakEvent(Player player, Block block) {
+        syntheticTreeBreak.set(true);
+
+        PersistentDataContainer pdc = player.getPersistentDataContainer();
+        pdc.set(syntheticBreakKey, PersistentDataType.BYTE, (byte) 1);
+
+        try {
+            BlockBreakEvent fakeEvent = new BlockBreakEvent(block, player);
+
+            fakeEvent.setDropItems(false);
+            fakeEvent.setExpToDrop(0);
+
+            getServer().getPluginManager().callEvent(fakeEvent);
+
+            return !fakeEvent.isCancelled();
+        } finally {
+            pdc.remove(syntheticBreakKey);
+            syntheticTreeBreak.set(false);
+        }
+    }
 
     private boolean shouldTreeChop(Player player, Block block, ItemStack tool) {
         if (!getConfig().getBoolean("tree-chopper.enabled", true)) {
@@ -154,6 +188,10 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
 
             if (tool == null || tool.getType().isAir()) {
                 break;
+            }
+
+            if (!callSyntheticBlockBreakEvent(player, log)) {
+                continue;
             }
 
             Collection<ItemStack> drops = log.getDrops(tool, player);
