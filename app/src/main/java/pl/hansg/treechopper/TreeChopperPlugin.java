@@ -1,30 +1,5 @@
 package pl.hansg.treechopper;
 
-import org.bukkit.GameMode;
-import org.bukkit.Material;
-import org.bukkit.NamespacedKey;
-import org.bukkit.Sound;
-import org.bukkit.World;
-import org.bukkit.block.Block;
-import org.bukkit.command.Command;
-import org.bukkit.command.CommandSender;
-import org.bukkit.configuration.file.FileConfiguration;
-import org.bukkit.configuration.file.YamlConfiguration;
-
-import net.kyori.adventure.text.format.NamedTextColor;
-import net.kyori.adventure.text.Component;
-import org.bukkit.enchantments.Enchantment;
-import org.bukkit.entity.Player;
-import org.bukkit.event.EventHandler;
-import org.bukkit.event.EventPriority;
-import org.bukkit.event.Listener;
-import org.bukkit.event.block.BlockBreakEvent;
-import org.bukkit.inventory.ItemStack;
-import org.bukkit.inventory.meta.Damageable;
-import org.bukkit.plugin.java.JavaPlugin;
-import org.bukkit.persistence.PersistentDataContainer;
-import org.bukkit.persistence.PersistentDataType;
-
 import java.io.File;
 import java.io.IOException;
 import java.util.ArrayDeque;
@@ -39,6 +14,31 @@ import java.util.Random;
 import java.util.Set;
 import java.util.UUID;
 
+import org.bukkit.GameMode;
+import org.bukkit.Material;
+import org.bukkit.NamespacedKey;
+import org.bukkit.Sound;
+import org.bukkit.World;
+import org.bukkit.block.Block;
+import org.bukkit.command.Command;
+import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
+import org.bukkit.enchantments.Enchantment;
+import org.bukkit.entity.Player;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.EventPriority;
+import org.bukkit.event.Listener;
+import org.bukkit.event.block.BlockBreakEvent;
+import org.bukkit.inventory.ItemStack;
+import org.bukkit.inventory.meta.Damageable;
+import org.bukkit.persistence.PersistentDataContainer;
+import org.bukkit.persistence.PersistentDataType;
+import org.bukkit.plugin.java.JavaPlugin;
+
+import net.kyori.adventure.text.Component;
+import net.kyori.adventure.text.format.NamedTextColor;
+
 public final class TreeChopperPlugin extends JavaPlugin implements Listener {
 
     private final Random random = new Random();
@@ -46,7 +46,7 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
     private final Set<UUID> toggledPlayers = new HashSet<>();
 
     private final ThreadLocal<Boolean> syntheticTreeBreak = ThreadLocal.withInitial(() -> false);
-    private NamespacedKey syntheticBreakKey;
+    private NamespacedKey skipCustomBlockBreakHandlersKey;
 
     private File dataFile;
     private FileConfiguration dataConfig;
@@ -57,7 +57,7 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
         setupDataFile();
         loadToggledPlayers();
 
-        syntheticBreakKey = new NamespacedKey("custommechanics", "synthetic_block_break");
+        skipCustomBlockBreakHandlersKey = new NamespacedKey("custommechanics", "skip_custom_block_break_handlers");
 
         getServer().getPluginManager().registerEvents(this, this);
 
@@ -75,7 +75,7 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
         getLogger().info("SimpleTreeChopper disabled.");
     }
 
-    @EventHandler(priority = EventPriority.HIGHEST, ignoreCancelled = true)
+    @EventHandler(priority = EventPriority.HIGH, ignoreCancelled = true)
     public void onBlockBreak(BlockBreakEvent event) {
         if(syntheticTreeBreak.get()) {
             return;
@@ -101,6 +101,37 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
         chopTree(player, block, tool);
     }
 
+    @EventHandler(priority = EventPriority.LOWEST, ignoreCancelled = true)
+    public void markTreeChopperHandledBreak(BlockBreakEvent event) {
+        if (syntheticTreeBreak.get()) {
+            return;
+        }
+
+        Player player = event.getPlayer();
+        Block block = event.getBlock();
+        ItemStack tool = player.getInventory().getItemInMainHand();
+
+        if (!shouldTreeChop(player, block, tool)) {
+            return;
+        }
+
+        player.getPersistentDataContainer().set(
+                skipCustomBlockBreakHandlersKey,
+                PersistentDataType.BYTE,
+                (byte) 1
+        );
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR, ignoreCancelled = false)
+    public void cleanupTreeChopperHandledBreak(BlockBreakEvent event) {
+        if (syntheticTreeBreak.get()) {
+            return;
+        }
+        
+        Player player = event.getPlayer();
+        player.getPersistentDataContainer().remove(skipCustomBlockBreakHandlersKey);
+    }
+
     private boolean isTreeChopperEnabled(Player player) {
         boolean defaultEnabled = getConfig().getBoolean("tree-chopper.default-enabled-for-players", true);
         boolean isToggled = toggledPlayers.contains(player.getUniqueId());
@@ -116,7 +147,8 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
         syntheticTreeBreak.set(true);
 
         PersistentDataContainer pdc = player.getPersistentDataContainer();
-        pdc.set(syntheticBreakKey, PersistentDataType.BYTE, (byte) 1);
+        boolean hadMarker = pdc.has(skipCustomBlockBreakHandlersKey, PersistentDataType.BYTE);
+        pdc.set(skipCustomBlockBreakHandlersKey, PersistentDataType.BYTE, (byte) 1);
 
         try {
             BlockBreakEvent fakeEvent = new BlockBreakEvent(block, player);
@@ -128,7 +160,9 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
 
             return !fakeEvent.isCancelled();
         } finally {
-            pdc.remove(syntheticBreakKey);
+            if (!hadMarker) {
+                pdc.remove(skipCustomBlockBreakHandlersKey);
+            }
             syntheticTreeBreak.set(false);
         }
     }
