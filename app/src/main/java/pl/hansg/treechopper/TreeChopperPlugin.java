@@ -57,7 +57,7 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
         setupDataFile();
         loadToggledPlayers();
 
-        syntheticBreakKey = new NamespacedKey("custommechanics", "synthetic_treechopper_break");
+        syntheticBreakKey = new NamespacedKey("custommechanics", "synthetic_block_break");
 
         getServer().getPluginManager().registerEvents(this, this);
 
