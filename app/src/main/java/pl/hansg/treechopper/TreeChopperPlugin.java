@@ -7,6 +7,9 @@ import org.bukkit.World;
 import org.bukkit.block.Block;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
+import org.bukkit.configuration.file.FileConfiguration;
+import org.bukkit.configuration.file.YamlConfiguration;
+
 import net.kyori.adventure.text.format.NamedTextColor;
 import net.kyori.adventure.text.Component;
 import org.bukkit.enchantments.Enchantment;
@@ -19,6 +22,8 @@ import org.bukkit.inventory.ItemStack;
 import org.bukkit.inventory.meta.Damageable;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -29,14 +34,22 @@ import java.util.Locale;
 import java.util.Queue;
 import java.util.Random;
 import java.util.Set;
+import java.util.UUID;
 
 public final class TreeChopperPlugin extends JavaPlugin implements Listener {
 
     private final Random random = new Random();
 
+    private final Set<UUID> toggledPlayers = new HashSet<>();
+
+    private File dataFile;
+    private FileConfiguration dataConfig;
+
     @Override
     public void onEnable() {
         saveDefaultConfig();
+        setupDataFile();
+        loadToggledPlayers();
 
         getServer().getPluginManager().registerEvents(this, this);
 
@@ -50,6 +63,7 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
 
     @Override
     public void onDisable() {
+        saveToggledPlayers();
         getLogger().info("SimpleTreeChopper disabled.");
     }
 
@@ -74,12 +88,27 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
         chopTree(player, block, tool);
     }
 
+    private boolean isTreeChopperEnabled(Player player) {
+    boolean defaultEnabled = getConfig().getBoolean("tree-chopper.default-enabled-for-players", true);
+    boolean isToggled = toggledPlayers.contains(player.getUniqueId());
+
+    if (defaultEnabled) {
+        return !isToggled;
+    }
+
+    return isToggled;
+}
+
     private boolean shouldTreeChop(Player player, Block block, ItemStack tool) {
         if (!getConfig().getBoolean("tree-chopper.enabled", true)) {
             return false;
         }
 
         if (!player.hasPermission("treechopper.use")) {
+            return false;
+        }
+
+        if (!isTreeChopperEnabled(player)) {
             return false;
         }
 
@@ -148,6 +177,53 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
         if (getConfig().getBoolean("tree-chopper.leaves.enabled", true)) {
             Set<Block> leaves = findLeavesAroundLogs(choppedLogs);
             chopLeaves(player, leaves, tool);
+        }
+    }
+
+    private void setupDataFile() {
+        dataFile = new File(getDataFolder(), "data.yml");
+
+        if (!dataFile.exists()) {
+            try {
+                getDataFolder().mkdirs();
+                dataFile.createNewFile();
+            } catch (IOException exception) {
+                getLogger().severe("Could not create data.yml");
+                exception.printStackTrace();
+            }
+        }
+
+        dataConfig = YamlConfiguration.loadConfiguration(dataFile);
+    }
+
+    private void loadToggledPlayers() {
+        toggledPlayers.clear();
+
+        List<String> uuids = dataConfig.getStringList("toggled-players");
+
+        for (String uuidString : uuids) {
+            try {
+                toggledPlayers.add(UUID.fromString(uuidString));
+            } catch (IllegalArgumentException ignored) {
+                getLogger().warning("Invalid UUID in data.yml: " + uuidString);
+            }
+        }
+    }
+
+    private void saveToggledPlayers() {
+        List<String> uuids = new ArrayList<>();
+
+        for (UUID uuid : toggledPlayers) {
+            uuids.add(uuid.toString());
+        }
+
+        dataConfig.set("toggled-players", uuids);
+
+        try {
+            dataConfig.save(dataFile);
+        } catch (IOException exception) {
+            getLogger().severe("Could not save data.yml");
+            exception.printStackTrace();
         }
     }
 
@@ -345,7 +421,13 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
 
     private void sendStatus(CommandSender sender) {
         sender.sendMessage(Component.text("SimpleTreeChopper status:", NamedTextColor.GOLD));
-        sender.sendMessage(Component.text("Enabled: ", NamedTextColor.GRAY).append(Component.text(getConfig().getBoolean("tree-chopper.enabled", true), NamedTextColor.YELLOW)));
+        sender.sendMessage(Component.text("Global enabled: ", NamedTextColor.GRAY).append(Component.text(getConfig().getBoolean("tree-chopper.enabled", true), NamedTextColor.YELLOW)));
+
+        if (sender instanceof Player player) {
+            sender.sendMessage(Component.text("Your TreeChopper: ", NamedTextColor.GRAY) 
+                    .append((isTreeChopperEnabled(player) ? Component.text("enabled", NamedTextColor.GREEN) : Component.text("disabled", NamedTextColor.RED))));
+        }
+
         sender.sendMessage(Component.text("Require sneaking: ", NamedTextColor.GRAY).append(Component.text(getConfig().getBoolean("tree-chopper.require-sneaking", true), NamedTextColor.YELLOW)));
         sender.sendMessage(Component.text("Require axe: ", NamedTextColor.GRAY).append(Component.text(getConfig().getBoolean("tree-chopper.require-axe", true), NamedTextColor.YELLOW)));
         sender.sendMessage(Component.text("Max logs: ", NamedTextColor.GRAY).append(Component.text(getConfig().getInt("tree-chopper.max-logs", 128), NamedTextColor.YELLOW)));
@@ -354,6 +436,7 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
 
     private void sendUsage(CommandSender sender) {
         sender.sendMessage(Component.text( "SimpleTreeChopper commands:", NamedTextColor.YELLOW));
+        sender.sendMessage(Component.text("/treechopper toggle", NamedTextColor.GRAY));
         sender.sendMessage(Component.text("/treechopper status", NamedTextColor.GRAY));
         sender.sendMessage(Component.text("/treechopper reload", NamedTextColor.GRAY));
     }
@@ -371,6 +454,36 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
 
         if (args[0].equalsIgnoreCase("status")) {
             sendStatus(sender);
+            return true;
+        }
+
+        if (args[0].equalsIgnoreCase("toggle")) {
+            if (!(sender instanceof Player player)) {
+                sender.sendMessage(Component.text("Only players can use this command.", NamedTextColor.RED));
+                return true;
+            }
+
+            if (!player.hasPermission("treechopper.toggle")) {
+                player.sendMessage(Component.text("You do not have permission.", NamedTextColor.RED));
+                return true;
+            }
+
+            UUID uuid = player.getUniqueId();
+
+            if (toggledPlayers.contains(uuid)) {
+                toggledPlayers.remove(uuid);
+            } else {
+                toggledPlayers.add(uuid);
+            }
+
+            saveToggledPlayers();
+
+            boolean enabled = isTreeChopperEnabled(player);
+
+            player.sendMessage(Component.text("TreeChopper is now ", NamedTextColor.YELLOW)
+                    .append((enabled ? Component.text("enabled", NamedTextColor.GREEN) : Component.text("disabled", NamedTextColor.RED)))
+                    .append(Component.text(".", NamedTextColor.YELLOW)));
+
             return true;
         }
 
@@ -398,6 +511,7 @@ public final class TreeChopperPlugin extends JavaPlugin implements Listener {
         }
 
         if (args.length == 1) {
+            suggestions.add("toggle");
             suggestions.add("status");
 
             if (sender.hasPermission("treechopper.reload")) {

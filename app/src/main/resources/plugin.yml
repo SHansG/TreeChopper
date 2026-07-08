@@ -7,13 +7,17 @@ description: Simple tree chopper with leaf removal and tool durability.
 
 commands:
   treechopper:
-    description: TreeChopper command
-    usage: /treechopper <reload|status>
-    aliases: [tc]
+    description: SimpleTreeChopper command
+    usage: /treechopper <toggle|reload|status>
+    aliases: [tc, treechop, choptree]
 
 permissions:
   treechopper.use:
-    description: Allows player to chop whole trees
+    description: Allows player to use tree chopping
+    default: true
+
+  treechopper.toggle:
+    description: Allows player to toggle tree chopping
     default: true
 
   treechopper.reload:

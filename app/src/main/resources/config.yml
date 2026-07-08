@@ -1,5 +1,6 @@
 tree-chopper:
   enabled: true
+  default-enabled-for-players: false
 
   # Only chop whole tree when player is sneaking.
   require-sneaking: true
